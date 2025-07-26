@@ -727,6 +727,7 @@ a.binary {{color:#69F}}
         default = self.app.DEFAULTS
         self.preferences = {
             'parseLinks': self.config.boolValue("parseLinks", default['parseLinks']),
+            'fastViewDefault': self.config.boolValue("fastViewDefault", default['fastViewDefault']),
             'newTab': self.config.boolValue("newTab", default['newTab']),
             'syntaxHighlighting': self.config.boolValue("syntaxHighlighting", default['syntaxHighlighting']),
             'teletype': self.config.boolValue("teletype", default['teletype']),
@@ -809,6 +810,7 @@ a.binary {{color:#69F}}
         """
         logger.debug("Writing user settings to %s", self.config.fileName())
         self.config.setValue("parseLinks", self.preferences['parseLinks'])
+        self.config.setValue("fastViewDefault", self.preferences['fastViewDefault'])
         self.config.setValue("newTab", self.preferences['newTab'])
         self.config.setValue("syntaxHighlighting", self.preferences['syntaxHighlighting'])
         self.config.setValue("teletype", self.preferences['teletype'])
@@ -907,6 +909,7 @@ a.binary {{color:#69F}}
         # Edit Menu
         self.actionEdit.triggered.connect(self.toggleEdit)
         self.actionBrowse.triggered.connect(self.toggleEdit)
+        self.actionFastView.triggered.connect(self.toggleFastView)
         self.actionUndo.triggered.connect(self.undo)
         self.actionRedo.triggered.connect(self.redo)
         self.actionCut.triggered.connect(self.cut)
@@ -1710,6 +1713,35 @@ a.binary {{color:#69F}}
         self.findRehighlightAll()
         if tab == self.currTab:
             self.editModeChanged.emit(tab.inEditMode)
+        return True
+
+    @Slot()
+    def toggleFastView(self, checked=False, tab=None):
+        """ Switch between normal Browse mode and Fast View mode.
+
+        :Parameters:
+            checked : `bool`
+                Unused. For signal/slot only
+            tab : `BrowserTab`
+                Tab to toggle fast view mode on
+        :Returns:
+            True if we switched modes; otherwise, False.
+        :Rtype:
+            `bool`
+        """
+        tab = tab or self.currTab
+        if not tab:
+            return False
+
+        # Don't allow fast view in edit mode
+        if tab.inEditMode:
+            return False
+
+        # Toggle fast view mode
+        tab.inFastView = not tab.inFastView
+        
+        # Refresh the tab to apply the new parsing mode
+        self.refreshTab(tab=tab)
         return True
 
     @Slot()
@@ -3054,7 +3086,7 @@ a.binary {{color:#69F}}
                         # Stop Loading Tab stops the expensive parsing of the file
                         # for links, checking if the links actually exist, etc.
                         # Setting it to this bypasses link parsing if the tab is in edit mode.
-                        parser.stop(tab.inEditMode or not self.preferences['parseLinks'])
+                        parser.stop(tab.inEditMode or getattr(tab, 'inFastView', False) or not self.preferences['parseLinks'])
                         self.actionStop.setEnabled(True)
 
                         parser.parse(nativeAbsPath, fileInfo, link)
@@ -4343,6 +4375,7 @@ class BrowserTab(QtWidgets.QWidget):
             color = self.style().standardPalette().base().color().darker(105).name()
         self.setStyleSheet("QTextBrowser{{background-color:{}}}".format(color))
         self.inEditMode = False
+        self.inFastView = parent.window().preferences.get('fastViewDefault', False) if parent else False
         self.isActive = True  # Track if this tab is open or has been closed.
         self.isNewTab = True  # Track if this tab has been used for any files yet.
         self.setAcceptDrops(True)
@@ -4857,6 +4890,7 @@ class App(QtCore.QObject):
             'lineNumbers': True,
             'newTab': False,
             'parseLinks': True,
+            'fastViewDefault': False,
             'showAllMessages': True,
             'showHiddenFiles': False,
             'syntaxHighlighting': True,
