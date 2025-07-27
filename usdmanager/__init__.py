@@ -600,6 +600,10 @@ a.binary {{color:#69F}}
             logger.debug("Setting highlighter to %s", ext)
             tab.highlighter.deleteLater()
             tab.highlighter = highlighter.Highlighter(tab.getCurrentTextWidget().document(), master)
+        
+        # Disable syntax highlighting if in Raw View mode
+        enableHighlighting = self.preferences['syntaxHighlighting'] and not getattr(tab, 'inRawView', False)
+        tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
 
     @Slot(QtCore.QPoint)
     def customTextBrowserContextMenu(self, pos):
@@ -1740,6 +1744,11 @@ a.binary {{color:#69F}}
 
         # Toggle raw view mode
         tab.inRawView = not tab.inRawView
+        
+        # Update syntax highlighting immediately without full refresh
+        enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
+        if hasattr(tab, 'highlighter') and tab.highlighter:
+            tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
         
         # Refresh the tab to apply the new parsing mode
         self.refreshTab(tab=tab)
