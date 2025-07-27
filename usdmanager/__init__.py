@@ -538,6 +538,9 @@ a.binary {{color:#69F}}
         # Add one of our special tabs.
         self.currTab = self.newTab()
         self.setNavigationMenus()
+        
+        # Ensure UI reflects initial tab state (e.g., Raw View button text)
+        self.updateEditButtons()
 
         # Adjust tab order.
         self.setTabOrder(self.addressBar, self.includeWidget.listView)
@@ -1752,6 +1755,11 @@ a.binary {{color:#69F}}
         
         # Refresh the tab to apply the new parsing mode
         self.refreshTab(tab=tab)
+        
+        # Ensure UI buttons are updated even if refreshTab() returns early (e.g., for empty tabs)
+        if tab == self.currTab:
+            self.updateEditButtons()
+        
         return True
 
     @Slot()
@@ -2238,6 +2246,7 @@ a.binary {{color:#69F}}
             self.preferences['newTab'] = dlg.getPrefNewTab()
             self.preferences['lineNumbers'] = dlg.getPrefLineNumbers()
             self.preferences['showAllMessages'] = dlg.getPrefShowAllMessages()
+            self.preferences['rawViewDefault'] = dlg.getPrefRawViewDefault()
             self.preferences['showHiddenFiles'] = dlg.getPrefShowHiddenFiles()
             self.preferences['autoCompleteAddressBar'] = dlg.getPrefAutoCompleteAddressBar()
             self.preferences['textEditor'] = dlg.getPrefTextEditor()
