@@ -374,6 +374,7 @@ a.binary {{color:#69F}}
         textEdit = icon("accessories-text-editor")
         self.actionEdit.setIcon(textEdit)
         self.actionTextEditor.setIcon(textEdit)
+        self.actionRawView.setIcon(textEdit)
         self.buttonGo.setIcon(icon("media-playback-start"))
         self.actionFullScreen.setIcon(icon("view-fullscreen"))
         self.browserReloadIcon = icon("view-refresh")
@@ -537,6 +538,9 @@ a.binary {{color:#69F}}
         # Add one of our special tabs.
         self.currTab = self.newTab()
         self.setNavigationMenus()
+        
+        # Ensure UI reflects initial tab state (e.g., Raw View button text)
+        self.updateEditButtons()
 
         # Adjust tab order.
         self.setTabOrder(self.addressBar, self.includeWidget.listView)
@@ -599,6 +603,10 @@ a.binary {{color:#69F}}
             logger.debug("Setting highlighter to %s", ext)
             tab.highlighter.deleteLater()
             tab.highlighter = highlighter.Highlighter(tab.getCurrentTextWidget().document(), master)
+        
+        # Disable syntax highlighting if in Raw View mode
+        enableHighlighting = self.preferences['syntaxHighlighting'] and not getattr(tab, 'inRawView', False)
+        tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
 
     @Slot(QtCore.QPoint)
     def customTextBrowserContextMenu(self, pos):
@@ -727,6 +735,7 @@ a.binary {{color:#69F}}
         default = self.app.DEFAULTS
         self.preferences = {
             'parseLinks': self.config.boolValue("parseLinks", default['parseLinks']),
+            'rawViewDefault': self.config.boolValue("rawViewDefault", default['rawViewDefault']),
             'newTab': self.config.boolValue("newTab", default['newTab']),
             'syntaxHighlighting': self.config.boolValue("syntaxHighlighting", default['syntaxHighlighting']),
             'teletype': self.config.boolValue("teletype", default['teletype']),
@@ -809,6 +818,7 @@ a.binary {{color:#69F}}
         """
         logger.debug("Writing user settings to %s", self.config.fileName())
         self.config.setValue("parseLinks", self.preferences['parseLinks'])
+        self.config.setValue("rawViewDefault", self.preferences['rawViewDefault'])
         self.config.setValue("newTab", self.preferences['newTab'])
         self.config.setValue("syntaxHighlighting", self.preferences['syntaxHighlighting'])
         self.config.setValue("teletype", self.preferences['teletype'])
@@ -907,6 +917,7 @@ a.binary {{color:#69F}}
         # Edit Menu
         self.actionEdit.triggered.connect(self.toggleEdit)
         self.actionBrowse.triggered.connect(self.toggleEdit)
+        self.actionRawView.triggered.connect(self.toggleRawView)
         self.actionUndo.triggered.connect(self.undo)
         self.actionRedo.triggered.connect(self.redo)
         self.actionCut.triggered.connect(self.cut)
@@ -1713,6 +1724,45 @@ a.binary {{color:#69F}}
         return True
 
     @Slot()
+    def toggleRawView(self, checked=False, tab=None):
+        """ Switch between normal Browse mode and Raw View mode.
+
+        :Parameters:
+            checked : `bool`
+                Unused. For signal/slot only
+            tab : `BrowserTab`
+                Tab to toggle raw view mode on
+        :Returns:
+            True if we switched modes; otherwise, False.
+        :Rtype:
+            `bool`
+        """
+        tab = tab or self.currTab
+        if not tab:
+            return False
+
+        # Don't allow raw view in edit mode
+        if tab.inEditMode:
+            return False
+
+        # Toggle raw view mode
+        tab.inRawView = not tab.inRawView
+        
+        # Update syntax highlighting immediately without full refresh
+        enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
+        if hasattr(tab, 'highlighter') and tab.highlighter:
+            tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
+        
+        # Refresh the tab to apply the new parsing mode
+        self.refreshTab(tab=tab)
+        
+        # Ensure UI buttons are updated even if refreshTab() returns early (e.g., for empty tabs)
+        if tab == self.currTab:
+            self.updateEditButtons()
+        
+        return True
+
+    @Slot()
     def undo(self):
         """ Undo last change in the current text editor.
         """
@@ -2196,6 +2246,7 @@ a.binary {{color:#69F}}
             self.preferences['newTab'] = dlg.getPrefNewTab()
             self.preferences['lineNumbers'] = dlg.getPrefLineNumbers()
             self.preferences['showAllMessages'] = dlg.getPrefShowAllMessages()
+            self.preferences['rawViewDefault'] = dlg.getPrefRawViewDefault()
             self.preferences['showHiddenFiles'] = dlg.getPrefShowHiddenFiles()
             self.preferences['autoCompleteAddressBar'] = dlg.getPrefAutoCompleteAddressBar()
             self.preferences['textEditor'] = dlg.getPrefTextEditor()
@@ -3054,7 +3105,7 @@ a.binary {{color:#69F}}
                         # Stop Loading Tab stops the expensive parsing of the file
                         # for links, checking if the links actually exist, etc.
                         # Setting it to this bypasses link parsing if the tab is in edit mode.
-                        parser.stop(tab.inEditMode or not self.preferences['parseLinks'])
+                        parser.stop(tab.inEditMode or getattr(tab, 'inRawView', False) or not self.preferences['parseLinks'])
                         self.actionStop.setEnabled(True)
 
                         parser.parse(nativeAbsPath, fileInfo, link)
@@ -3408,6 +3459,8 @@ a.binary {{color:#69F}}
             self.actionUncomment.setEnabled(True)
             self.actionIndent.setEnabled(True)
             self.actionUnindent.setEnabled(True)
+            self.actionRawView.setEnabled(False)
+            self.actionRawView.setText("Raw View")
         else:
             self.actionEdit.setVisible(True)
             self.actionBrowse.setVisible(False)
@@ -3422,6 +3475,8 @@ a.binary {{color:#69F}}
             self.actionUncomment.setEnabled(False)
             self.actionIndent.setEnabled(False)
             self.actionUnindent.setEnabled(False)
+            self.actionRawView.setEnabled(True)
+            self.actionRawView.setText("Raw View" if not self.currTab.inRawView else "Disable Raw View")
 
     @Slot(str)
     def validateAddressBar(self, address):
@@ -4343,6 +4398,7 @@ class BrowserTab(QtWidgets.QWidget):
             color = self.style().standardPalette().base().color().darker(105).name()
         self.setStyleSheet("QTextBrowser{{background-color:{}}}".format(color))
         self.inEditMode = False
+        self.inRawView = parent.window().preferences.get('rawViewDefault', False) if parent else False
         self.isActive = True  # Track if this tab is open or has been closed.
         self.isNewTab = True  # Track if this tab has been used for any files yet.
         self.setAcceptDrops(True)
@@ -4857,6 +4913,7 @@ class App(QtCore.QObject):
             'lineNumbers': True,
             'newTab': False,
             'parseLinks': True,
+            'rawViewDefault': False,
             'showAllMessages': True,
             'showHiddenFiles': False,
             'syntaxHighlighting': True,
