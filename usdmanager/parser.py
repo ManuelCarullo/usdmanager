@@ -95,6 +95,14 @@ class FileParser(QObject):
     
         self.regex = None
         self._stop = False
+        self._html_cache = None
+        self._html_dirty = True
+        
+        # Regex compilation cache - class-level to share across instances
+        if not hasattr(FileParser, '_regex_cache'):
+            FileParser._regex_cache = {}
+            FileParser._regex_cache_max_size = 20
+        
         self.cleanup()
         
         self.progress.connect(parent.setLoadingProgress)
@@ -126,7 +134,8 @@ class FileParser(QObject):
         Don't override.
         """
         self.exists = PathCacheDict()
-        self.html = ""
+        self._html_cache = None
+        self._html_dirty = True
         self.text = []
         self.truncated = False
         self.warning = None
@@ -140,6 +149,15 @@ class FileParser(QObject):
         NOTE: If this RegEx changes, the syntax highlighting rules may need to as well.
         """
         exts = self.parent().programs.keys()
+        pattern_key = '|'.join(sorted(exts))
+        
+        # Check cache first
+        if pattern_key in FileParser._regex_cache:
+            self.regex = FileParser._regex_cache[pattern_key]
+            logger.debug("Using cached regex for pattern: %s", pattern_key[:50] + "..." if len(pattern_key) > 50 else pattern_key)
+            return
+        
+        # Compile new regex
         self.regex = re.compile(
             r'(?:[\'"@]+)'                    # 1 or more single quote, double quote, or at symbol.
             r'('                              # Group 1: Path. This is the main group we are looking for. Matches based on extension before the pipe, or variable after the pipe.
@@ -147,8 +165,21 @@ class FileParser(QObject):
                 r'\.(?:'+'|'.join(exts)+r')'  # followed by a period, then 1 of the acceptable file extensions
                 r'|\${[\w/${}:.-]+}'          # One or more of these characters -- A-Za-z0-9_-/${}:. -- inside the variable curly brackets -- ${}
             r')'                              # end group 1
-            r'(?:[\'"@]|\\\")'  # 1 of: single quote, double quote, backslash followed by double quote, or at symbol.
+            r'(?:[\'"@]|\\\")',  # 1 of: single quote, double quote, backslash followed by double quote, or at symbol.
+            re.IGNORECASE | re.MULTILINE  # Optimize with useful flags
         )
+        
+        # Cache the compiled regex
+        FileParser._regex_cache[pattern_key] = self.regex
+        
+        # Implement LRU-style cache eviction
+        if len(FileParser._regex_cache) > FileParser._regex_cache_max_size:
+            # Remove oldest entry (simple FIFO for now)
+            oldest_key = next(iter(FileParser._regex_cache))
+            del FileParser._regex_cache[oldest_key]
+            logger.debug("Evicted oldest regex from cache")
+        
+        logger.debug("Compiled and cached new regex for pattern: %s", pattern_key[:50] + "..." if len(pattern_key) > 50 else pattern_key)
 
     @staticmethod
     def generateTempFile(fileName, tmpDir=None):
@@ -182,7 +213,13 @@ class FileParser(QObject):
         """
         self.cleanup()
         
-        self.status.emit("Reading file")
+        # Fast path for raw mode - bypass heavy processing
+        if self._stop:
+            logger.debug("Using fast raw mode parsing for file: %s", nativeAbsPath)
+            return self.parseRawMode(nativeAbsPath)
+        
+        self.status.emit("Reading file (Normal Mode)")
+        logger.debug("Using normal parsing mode for file: %s", nativeAbsPath)
         self.text = self.read(nativeAbsPath)
         
         # TODO: Figure out a better way to handle streaming text for large files like Crate geometry.
@@ -214,6 +251,10 @@ class FileParser(QObject):
         # Escape HTML characters for proper display.
         # Do this before we add any actual HTML characters.
         lines = [escape(x) for x in self.text]
+        
+        # Batch progress updates to reduce Qt signal overhead
+        progress_batch_size = 1000  # Emit progress every 1000 lines instead of every line
+        
         for i, line in enumerate(lines):
             if self._stop:
                 # If the user has requested to stop, load the rest of the document
@@ -221,7 +262,9 @@ class FileParser(QObject):
                 html += "".join(lines[i:])
                 break
             
-            emit(i)
+            # Batch progress updates for better performance
+            if i % progress_batch_size == 0:
+                emit(i)
             if len(line) > lineCharLimit:
                 html += self.parseLongLine(line)
                 continue
@@ -269,6 +312,85 @@ class FileParser(QObject):
             `str`
         """
         return HTML_BODY.format(text)
+    
+    @property
+    def html(self):
+        """ Lazy HTML generation - only create when actually needed.
+        
+        :Returns:
+            HTML representation of the file
+        :Rtype:
+            `str`
+        """
+        if self._html_cache is None or self._html_dirty:
+            if self._stop:  # Raw mode
+                self._html_cache = self.generateMinimalHtml()
+            else:
+                # Normal mode - generate full HTML if not already cached
+                if not hasattr(self, '_processed_html'):
+                    self._processed_html = ""
+                self._html_cache = self._processed_html
+            self._html_dirty = False
+        return self._html_cache
+    
+    @html.setter
+    def html(self, value):
+        """ Set the HTML cache directly (for backward compatibility).
+        
+        :Parameters:
+            value : `str`
+                HTML content
+        """
+        self._html_cache = value
+        self._html_dirty = False
+        if not self._stop:  # In normal mode, also store as processed HTML
+            self._processed_html = value
+    
+    def parseRawMode(self, nativeAbsPath):
+        """ Ultra-fast parsing for Raw View mode - bypasses link parsing and minimal HTML generation.
+        
+        :Parameters:
+            nativeAbsPath : `str`
+                OS-native absolute file path
+        """
+        self.status.emit("Reading file (Fast Raw Mode)")
+        logger.debug("*** FAST RAW MODE ENGAGED for %s ***", nativeAbsPath)
+        self.text = self.read(nativeAbsPath)
+        
+        # Apply line limit if necessary
+        length = len(self.text)
+        if hasattr(self.parent(), 'preferences') and length > self.parent().preferences.get('lineLimit', 1000000):
+            limit = self.parent().preferences['lineLimit']
+            self.truncated = True
+            self.text = self.text[:limit]
+            self.warning = "Extremely large file! Capping display at {:,d} lines. You can edit this cap in the "\
+                          "Advanced tab of Preferences.".format(limit)
+        
+        # Set progress bar maximum (much faster without per-line updates)
+        if hasattr(self.parent(), 'loadingProgressBar'):
+            self.parent().loadingProgressBar.setMaximum(length)
+        
+        # Mark HTML as dirty - will be generated lazily when accessed
+        self._html_dirty = True
+        
+        logger.debug("Raw mode parsing complete")
+    
+    def generateMinimalHtml(self):
+        """ Generate minimal HTML for raw mode - just escaped text in a pre tag.
+        
+        :Returns:
+            Minimal HTML representation
+        :Rtype:
+            `str`
+        """
+        # Join all text and escape HTML characters once
+        import html
+        escaped_text = html.escape(''.join(self.text))
+        
+        # Simple pre-formatted wrapper - no syntax highlighting, no links
+        simple_html = f'<pre style="font-family: monospace; white-space: pre-wrap; margin: 0; padding: 8px;">{escaped_text}</pre>'
+        
+        return HTML_BODY.format(simple_html)
     
     def parseMatch(self, match, linkPath, nativeAbsPath, fileInfo):
         """ Parse a RegEx match of a patch to another file.
@@ -339,8 +461,113 @@ class FileParser(QObject):
         :Rtype:
             [`str`]
         """
+        # Use streaming reader for raw mode to improve performance with large files
+        if self._stop:
+            return self.readStreaming(path)
+        
         with open(path) as f:
             return f.readlines()
+    
+    def readStreaming(self, path, chunk_size=None):
+        """Stream file in chunks with content-aware loading strategies.
+        
+        :Parameters:
+            path : `str`
+                OS-native absolute file path
+            chunk_size : `int` | None
+                Size of chunks to read at once (auto-determined if None)
+        :Returns:
+            List of lines of text, potentially truncated for very large files
+        :Rtype:
+            [`str`]
+        """
+        try:
+            # Content-aware loading strategy
+            strategy = self.getLoadingStrategy(path)
+            chunk_size = chunk_size or strategy['chunk_size']
+            max_size = strategy['max_size']
+            
+            logger.debug("Using loading strategy: %s for file %s", strategy['name'], path)
+            
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content_chunks = []
+                total_size = 0
+                
+                while total_size < max_size:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    content_chunks.append(chunk)
+                    total_size += len(chunk)
+                    
+                    # Adaptive chunk size for very large files
+                    if strategy['adaptive'] and total_size > 10 * 1024 * 1024:  # After 10MB
+                        chunk_size = min(chunk_size * 2, 64 * 1024)  # Double chunk size up to 64KB
+                
+                # Join chunks and split into lines
+                content = ''.join(content_chunks)
+                
+                if total_size >= max_size:
+                    self.truncated = True
+                    self.warning = f"Large file truncated at {max_size:,} characters for Raw View performance"
+                
+                # Split into lines, preserving line endings
+                return content.splitlines(keepends=True)
+                
+        except Exception as e:
+            logger.error(f"Error reading file in streaming mode: {e}")
+            return [f"Error reading file: {e}\n"]
+    
+    def getLoadingStrategy(self, path):
+        """Determine optimal loading strategy based on file characteristics.
+        
+        :Parameters:
+            path : `str`
+                File path to analyze
+        :Returns:
+            Strategy configuration dictionary
+        :Rtype:
+            `dict`
+        """
+        from Qt.QtCore import QFileInfo
+        
+        file_info = QFileInfo(path)
+        file_size = file_info.size()
+        extension = file_info.suffix().lower()
+        
+        # Get user preferences
+        prefs = getattr(self.parent(), 'preferences', {})
+        base_max_size = prefs.get('rawModeMaxSize', 50 * 1024 * 1024)
+        
+        # Content-aware strategies
+        if file_size > 100 * 1024 * 1024:  # >100MB
+            return {
+                'name': 'streaming_huge',
+                'chunk_size': 32 * 1024,  # 32KB chunks
+                'max_size': min(base_max_size, 20 * 1024 * 1024),  # Limit to 20MB for huge files
+                'adaptive': True
+            }
+        elif file_size > 20 * 1024 * 1024:  # >20MB
+            return {
+                'name': 'streaming_large',
+                'chunk_size': 16 * 1024,  # 16KB chunks
+                'max_size': base_max_size,
+                'adaptive': True
+            }
+        elif extension in ('usdc', 'usd') and file_size > 5 * 1024 * 1024:  # USD files >5MB
+            return {
+                'name': 'streaming_usd_optimized',
+                'chunk_size': 12 * 1024,  # 12KB chunks - good for USD structure
+                'max_size': base_max_size,
+                'adaptive': False
+            }
+        else:  # Small files
+            return {
+                'name': 'streaming_default',
+                'chunk_size': 8 * 1024,  # 8KB chunks
+                'max_size': base_max_size,
+                'adaptive': False
+            }
     
     def stop(self, stop=True):
         """ Request to stop parsing the active file for links.
@@ -352,6 +579,8 @@ class FileParser(QObject):
                 To stop or not
         """
         self._stop = stop
+        if stop:
+            logger.debug("Parser stop flag set to True - will use raw mode")
 
     @Slot(bool)
     def stopTriggered(self, checked=False):

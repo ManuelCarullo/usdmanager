@@ -755,6 +755,7 @@ a.binary {{color:#69F}}
             'tabSpaces': int(self.config.value("tabSpaces", default['tabSpaces'])),
             'theme': self.config.value("theme", default['theme']),
             'lineLimit': int(self.config.value("lineLimit", default['lineLimit'])),
+            'rawModeMaxSize': int(self.config.value("rawModeMaxSize", default['rawModeMaxSize'])),
             'autoIndent': self.config.boolValue("autoIndent", default['autoIndent']),
         }
 
@@ -833,6 +834,7 @@ a.binary {{color:#69F}}
         self.config.setValue("tabSpaces", self.preferences['tabSpaces'])
         self.config.setValue("theme", self.preferences['theme'])
         self.config.setValue("lineLimit", self.preferences['lineLimit'])
+        self.config.setValue("rawModeMaxSize", self.preferences['rawModeMaxSize'])
         self.config.setValue("autoIndent", self.preferences['autoIndent'])
 
         # Write self.programs to settings object
@@ -1692,6 +1694,14 @@ a.binary {{color:#69F}}
             vScrollPos = tab.textBrowser.verticalScrollBar().value()
             tab.textBrowser.setVisible(False)
             tab.textEditor.setVisible(True)
+            tab.textEditor.setReadOnly(False)  # Enable editing in edit mode
+            
+            # Apply deferred text content if available (was deferred during initial load)
+            if hasattr(tab, '_deferredTextContent') and tab._deferredTextContent is not None:
+                logger.debug("Applying deferred text content to textEditor")
+                tab.textEditor.setPlainText(tab._deferredTextContent)
+                tab._deferredTextContent = None  # Clear after applying
+            
             tab.textEditor.setFocus()
             tab.textEditor.horizontalScrollBar().setValue(hScrollPos)
             tab.textEditor.verticalScrollBar().setValue(vScrollPos)
@@ -1705,11 +1715,29 @@ a.binary {{color:#69F}}
             # be safe, but this can be slow.
             refreshed = self.refreshTab(tab=tab)
 
-            tab.textEditor.setVisible(False)
-            tab.textBrowser.setVisible(True)
-            tab.textBrowser.setFocus()
-            tab.textBrowser.horizontalScrollBar().setValue(hScrollPos)
-            tab.textBrowser.verticalScrollBar().setValue(vScrollPos)
+            # Handle widget visibility based on Raw View mode
+            if getattr(tab, 'inRawView', False):
+                # Raw View: Keep using textEditor (read-only)
+                tab.textEditor.setVisible(True)
+                tab.textBrowser.setVisible(False)
+                tab.textEditor.setReadOnly(True)  # Disable editing in raw view
+                tab.textEditor.setFocus()
+                tab.textEditor.horizontalScrollBar().setValue(hScrollPos)
+                tab.textEditor.verticalScrollBar().setValue(vScrollPos)
+            else:
+                # Normal View: Use textBrowser for rich HTML display
+                tab.textEditor.setVisible(False)
+                tab.textBrowser.setVisible(True)
+                
+                # Apply deferred HTML content if available and we didn't refresh (refresh loads new content)
+                if not refreshed and hasattr(tab, '_deferredHtmlContent') and tab._deferredHtmlContent is not None:
+                    logger.debug("Applying deferred HTML content to textBrowser")
+                    tab.textBrowser.setHtml(tab._deferredHtmlContent)
+                    tab._deferredHtmlContent = None  # Clear after applying
+                
+                tab.textBrowser.setFocus()
+                tab.textBrowser.horizontalScrollBar().setValue(hScrollPos)
+                tab.textBrowser.verticalScrollBar().setValue(vScrollPos)
 
         # Don't double-up the below commands if we already refreshed the tab.
         if not refreshed:
@@ -1753,8 +1781,22 @@ a.binary {{color:#69F}}
         if hasattr(tab, 'highlighter') and tab.highlighter:
             tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
         
-        # Refresh the tab to apply the new parsing mode
+        # Refresh the tab to apply the new parsing mode and update widget visibility
         self.refreshTab(tab=tab)
+        
+        # After refresh, ensure proper widget visibility for new raw view state
+        if not tab.inEditMode:  # Only adjust if not in edit mode
+            if tab.inRawView:
+                # Switching to Raw View: Use textEditor for fast plain text
+                tab.textBrowser.setVisible(False)
+                tab.textEditor.setVisible(True)
+                tab.textEditor.setReadOnly(True)
+                tab.textEditor.setFocus()
+            else:
+                # Switching to Normal View: Use textBrowser for rich HTML
+                tab.textEditor.setVisible(False)
+                tab.textBrowser.setVisible(True)
+                tab.textBrowser.setFocus()
         
         # Ensure UI buttons are updated even if refreshTab() returns early (e.g., for empty tabs)
         if tab == self.currTab:
@@ -3105,17 +3147,43 @@ a.binary {{color:#69F}}
                         # Stop Loading Tab stops the expensive parsing of the file
                         # for links, checking if the links actually exist, etc.
                         # Setting it to this bypasses link parsing if the tab is in edit mode.
-                        parser.stop(tab.inEditMode or getattr(tab, 'inRawView', False) or not self.preferences['parseLinks'])
+                        inRawView = getattr(tab, 'inRawView', False)
+                        shouldStop = tab.inEditMode or inRawView or not self.preferences['parseLinks']
+                        logger.debug("Parser stop decision: inEditMode=%s, inRawView=%s, parseLinks=%s, shouldStop=%s", 
+                                   tab.inEditMode, inRawView, self.preferences['parseLinks'], shouldStop)
+                        parser.stop(shouldStop)
                         self.actionStop.setEnabled(True)
 
                         parser.parse(nativeAbsPath, fileInfo, link)
                         tab.fileFormat = parser.fileFormat
                         self.tabWidget.setTabIcon(idx, parser.icon)
                         self.setHighlighter(ext, tab=tab)
-                        logger.debug("Setting HTML")
-                        tab.textBrowser.setHtml(parser.html)
-                        logger.debug("Setting plain text")
-                        tab.textEditor.setPlainText("".join(parser.text))
+                        
+                        # Smart widget selection based on mode for optimal performance
+                        if tab.inEditMode:
+                            # Edit mode: textEditor visible, textBrowser hidden
+                            logger.debug("Setting plain text (Edit Mode - immediate)")
+                            tab.textEditor.setPlainText("".join(parser.text))
+                            tab.textEditor.setReadOnly(False)  # Enable editing
+                            logger.debug("Deferring HTML content (textBrowser hidden)")
+                            tab._deferredHtmlContent = parser.html
+                        elif getattr(tab, 'inRawView', False):
+                            # Raw View mode: Use textEditor for ultra-fast plain text display
+                            logger.debug("Setting plain text (Raw View Mode - ultra-fast)")
+                            tab.textEditor.setVisible(True)
+                            tab.textBrowser.setVisible(False)
+                            tab.textEditor.setPlainText("".join(parser.text))
+                            tab.textEditor.setReadOnly(True)  # Disable editing in raw view
+                            logger.debug("Skipping HTML generation entirely (Raw View)")
+                            tab._deferredHtmlContent = None  # No HTML needed
+                        else:
+                            # Normal View mode: textBrowser visible for rich HTML display
+                            logger.debug("Setting HTML (Normal View Mode)")
+                            tab.textBrowser.setVisible(True)
+                            tab.textEditor.setVisible(False)
+                            tab.textBrowser.setHtml(parser.html)
+                            logger.debug("Deferring plain text content (textEditor hidden)")
+                            tab._deferredTextContent = "".join(parser.text)
                         truncated = parser.truncated
                         warning = parser.warning
                         parser.cleanup()
@@ -3136,8 +3204,25 @@ a.binary {{color:#69F}}
             else:
                 # Load an empty tab pointing to the nonexistent file.
                 self.setHighlighter(ext, tab=tab)
-                tab.textBrowser.setHtml("")
-                tab.textEditor.setPlainText("")
+                
+                # Smart widget selection for empty tab
+                if tab.inEditMode:
+                    tab.textEditor.setPlainText("")
+                    tab.textEditor.setReadOnly(False)
+                    tab._deferredHtmlContent = ""
+                elif getattr(tab, 'inRawView', False):
+                    # Raw View: Use textEditor for consistency and speed
+                    tab.textEditor.setVisible(True)
+                    tab.textBrowser.setVisible(False)
+                    tab.textEditor.setPlainText("")
+                    tab.textEditor.setReadOnly(True)
+                    tab._deferredHtmlContent = None
+                else:
+                    # Normal View: Use textBrowser
+                    tab.textBrowser.setVisible(True)
+                    tab.textEditor.setVisible(False)
+                    tab.textBrowser.setHtml("")
+                    tab._deferredTextContent = ""
                 truncated = False
                 warning = None
 
@@ -4402,6 +4487,10 @@ class BrowserTab(QtWidgets.QWidget):
         self.isActive = True  # Track if this tab is open or has been closed.
         self.isNewTab = True  # Track if this tab has been used for any files yet.
         self.setAcceptDrops(True)
+        
+        # Deferred content loading - stores content for hidden widgets
+        self._deferredHtmlContent = None
+        self._deferredTextContent = None
         self.breadcrumb = ""
         self.history = []  # List of FileStatus objects
         self.historyIndex = -1  # First file opened will be 0.
@@ -4914,6 +5003,7 @@ class App(QtCore.QObject):
             'newTab': False,
             'parseLinks': True,
             'rawViewDefault': False,
+            'rawModeMaxSize': 50 * 1024 * 1024,  # 50MB limit for raw mode streaming
             'showAllMessages': True,
             'showHiddenFiles': False,
             'syntaxHighlighting': True,
