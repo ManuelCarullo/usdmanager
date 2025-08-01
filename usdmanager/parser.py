@@ -127,6 +127,7 @@ class FileParser(QObject):
         Don't override.
         """
         self.exists = PathCacheDict()
+        self.html = ""
         self.text = []
         self.truncated = False
         self.warning = None
@@ -282,35 +283,6 @@ class FileParser(QObject):
         """
         return HTML_BODY.format(text)
     
-    @property
-    def html(self):
-        """ Get HTML representation of the file (Normal View only).
-        
-        :Returns:
-            HTML representation of the file
-        :Rtype:
-            `str`
-        """
-        # Raw mode doesn't use HTML - it uses plain text directly in TextEditor
-        if self._stop:
-            return ""
-        
-        # Normal mode - return processed HTML
-        if not hasattr(self, '_processed_html'):
-            self._processed_html = ""
-        return self._processed_html
-    
-    @html.setter
-    def html(self, value):
-        """ Set the HTML content (Normal View only).
-        
-        :Parameters:
-            value : `str`
-                HTML content
-        """
-        # Only store HTML in normal mode
-        if not self._stop:
-            self._processed_html = value
     
     def parseRawMode(self, nativeAbsPath):
         """ Ultra-fast parsing for Raw View mode - bypasses link parsing and minimal HTML generation.
