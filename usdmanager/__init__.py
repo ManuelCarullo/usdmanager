@@ -1696,12 +1696,6 @@ a.binary {{color:#69F}}
             tab.textEditor.setVisible(True)
             tab.textEditor.setReadOnly(False)  # Enable editing in edit mode
             
-            # Apply deferred text content if available (was deferred during initial load)
-            if hasattr(tab, '_deferredTextContent') and tab._deferredTextContent is not None:
-                logger.debug("Applying deferred text content to textEditor")
-                tab.textEditor.setPlainText(tab._deferredTextContent)
-                tab._deferredTextContent = None  # Clear after applying
-            
             tab.textEditor.setFocus()
             tab.textEditor.horizontalScrollBar().setValue(hScrollPos)
             tab.textEditor.verticalScrollBar().setValue(vScrollPos)
@@ -1728,12 +1722,6 @@ a.binary {{color:#69F}}
                 # Normal View: Use textBrowser for rich HTML display
                 tab.textEditor.setVisible(False)
                 tab.textBrowser.setVisible(True)
-                
-                # Apply deferred HTML content if available and we didn't refresh (refresh loads new content)
-                if not refreshed and hasattr(tab, '_deferredHtmlContent') and tab._deferredHtmlContent is not None:
-                    logger.debug("Applying deferred HTML content to textBrowser")
-                    tab.textBrowser.setHtml(tab._deferredHtmlContent)
-                    tab._deferredHtmlContent = None  # Clear after applying
                 
                 tab.textBrowser.setFocus()
                 tab.textBrowser.horizontalScrollBar().setValue(hScrollPos)
@@ -3159,14 +3147,12 @@ a.binary {{color:#69F}}
                         self.tabWidget.setTabIcon(idx, parser.icon)
                         self.setHighlighter(ext, tab=tab)
                         
-                        # Smart widget selection based on mode for optimal performance
+                        # Set content based on current view mode
                         if tab.inEditMode:
                             # Edit mode: textEditor visible, textBrowser hidden
-                            logger.debug("Setting plain text (Edit Mode - immediate)")
+                            logger.debug("Setting plain text (Edit Mode)")
                             tab.textEditor.setPlainText("".join(parser.text))
                             tab.textEditor.setReadOnly(False)  # Enable editing
-                            logger.debug("Deferring HTML content (textBrowser hidden)")
-                            tab._deferredHtmlContent = parser.html
                         elif getattr(tab, 'inRawView', False):
                             # Raw View mode: Use textEditor for ultra-fast plain text display
                             logger.debug("Setting plain text (Raw View Mode - ultra-fast)")
@@ -3174,16 +3160,12 @@ a.binary {{color:#69F}}
                             tab.textBrowser.setVisible(False)
                             tab.textEditor.setPlainText("".join(parser.text))
                             tab.textEditor.setReadOnly(True)  # Disable editing in raw view
-                            logger.debug("Skipping HTML generation entirely (Raw View)")
-                            tab._deferredHtmlContent = None  # No HTML needed
                         else:
                             # Normal View mode: textBrowser visible for rich HTML display
                             logger.debug("Setting HTML (Normal View Mode)")
                             tab.textBrowser.setVisible(True)
                             tab.textEditor.setVisible(False)
                             tab.textBrowser.setHtml(parser.html)
-                            logger.debug("Deferring plain text content (textEditor hidden)")
-                            tab._deferredTextContent = "".join(parser.text)
                         truncated = parser.truncated
                         warning = parser.warning
                         parser.cleanup()
@@ -3205,24 +3187,21 @@ a.binary {{color:#69F}}
                 # Load an empty tab pointing to the nonexistent file.
                 self.setHighlighter(ext, tab=tab)
                 
-                # Smart widget selection for empty tab
+                # Set empty content based on current view mode
                 if tab.inEditMode:
                     tab.textEditor.setPlainText("")
                     tab.textEditor.setReadOnly(False)
-                    tab._deferredHtmlContent = ""
                 elif getattr(tab, 'inRawView', False):
                     # Raw View: Use textEditor for consistency and speed
                     tab.textEditor.setVisible(True)
                     tab.textBrowser.setVisible(False)
                     tab.textEditor.setPlainText("")
                     tab.textEditor.setReadOnly(True)
-                    tab._deferredHtmlContent = None
                 else:
                     # Normal View: Use textBrowser
                     tab.textBrowser.setVisible(True)
                     tab.textEditor.setVisible(False)
                     tab.textBrowser.setHtml("")
-                    tab._deferredTextContent = ""
                 truncated = False
                 warning = None
 
@@ -4488,9 +4467,6 @@ class BrowserTab(QtWidgets.QWidget):
         self.isNewTab = True  # Track if this tab has been used for any files yet.
         self.setAcceptDrops(True)
         
-        # Deferred content loading - stores content for hidden widgets
-        self._deferredHtmlContent = None
-        self._deferredTextContent = None
         self.breadcrumb = ""
         self.history = []  # List of FileStatus objects
         self.historyIndex = -1  # First file opened will be 0.
