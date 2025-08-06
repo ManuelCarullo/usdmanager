@@ -95,7 +95,6 @@ class FileParser(QObject):
     
         self.regex = None
         self._stop = False
-        
         self.cleanup()
         
         self.progress.connect(parent.setLoadingProgress)
@@ -148,7 +147,7 @@ class FileParser(QObject):
                 r'\.(?:'+'|'.join(exts)+r')'  # followed by a period, then 1 of the acceptable file extensions
                 r'|\${[\w/${}:.-]+}'          # One or more of these characters -- A-Za-z0-9_-/${}:. -- inside the variable curly brackets -- ${}
             r')'                              # end group 1
-            r'(?:[\'"@]|\\\")',  # 1 of: single quote, double quote, backslash followed by double quote, or at symbol.
+            r'(?:[\'"@]|\\\")'  # 1 of: single quote, double quote, backslash followed by double quote, or at symbol.
         )
 
     @staticmethod
@@ -185,7 +184,7 @@ class FileParser(QObject):
         
         # Fast path for raw mode - bypass heavy processing
         if self._stop:
-            logger.debug("Using fast raw mode parsing for file: %s", nativeAbsPath)
+            logger.debug("Using raw mode parsing for file: %s", nativeAbsPath)
             return self.parseRawMode(nativeAbsPath)
         
         self.status.emit("Reading file (Normal Mode)")
@@ -221,10 +220,6 @@ class FileParser(QObject):
         # Escape HTML characters for proper display.
         # Do this before we add any actual HTML characters.
         lines = [escape(x) for x in self.text]
-        
-        # Batch progress updates to reduce Qt signal overhead
-        progress_batch_size = 1000  # Emit progress every 1000 lines instead of every line
-        
         for i, line in enumerate(lines):
             if self._stop:
                 # If the user has requested to stop, load the rest of the document
@@ -232,9 +227,7 @@ class FileParser(QObject):
                 html += "".join(lines[i:])
                 break
             
-            # Batch progress updates for better performance
-            if i % progress_batch_size == 0:
-                emit(i)
+            emit(i)
             if len(line) > lineCharLimit:
                 html += self.parseLongLine(line)
                 continue
@@ -285,28 +278,24 @@ class FileParser(QObject):
     
     
     def parseRawMode(self, nativeAbsPath):
-        """ Ultra-fast parsing for Raw View mode - bypasses link parsing and minimal HTML generation.
+        """ Fast parsing for Raw View mode - bypasses link parsing and minimal HTML generation.
         
         :Parameters:
             nativeAbsPath : `str`
                 OS-native absolute file path
         """
-        self.status.emit("Reading file (Fast Raw Mode)")
-        logger.debug("*** FAST RAW MODE ENGAGED for %s ***", nativeAbsPath)
+        self.status.emit("Reading file (Raw View Mode)")
         self.text = self.read(nativeAbsPath)
         
-        # Apply line limit if necessary
         length = len(self.text)
-        if hasattr(self.parent(), 'preferences') and length > self.parent().preferences.get('lineLimit', 1000000):
+        if length > self.parent().preferences.get('lineLimit', 1000000):
             limit = self.parent().preferences['lineLimit']
             self.truncated = True
             self.text = self.text[:limit]
             self.warning = "Extremely large file! Capping display at {:,d} lines. You can edit this cap in the "\
                           "Advanced tab of Preferences.".format(limit)
         
-        # Set progress bar maximum (much faster without per-line updates)
-        if hasattr(self.parent(), 'loadingProgressBar'):
-            self.parent().loadingProgressBar.setMaximum(length)
+        self.parent().loadingProgressBar.setMaximum(length)
         
         
         logger.debug("Raw mode parsing complete")

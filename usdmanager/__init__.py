@@ -605,7 +605,7 @@ a.binary {{color:#69F}}
             tab.highlighter = highlighter.Highlighter(tab.getCurrentTextWidget().document(), master)
         
         # Disable syntax highlighting if in Raw View mode
-        enableHighlighting = self.preferences['syntaxHighlighting'] and not getattr(tab, 'inRawView', False)
+        enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
         tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
 
     @Slot(QtCore.QPoint)
@@ -1710,7 +1710,7 @@ a.binary {{color:#69F}}
             refreshed = self.refreshTab(tab=tab)
 
             # Handle widget visibility based on Raw View mode
-            if getattr(tab, 'inRawView', False):
+            if tab.inRawView:
                 # Raw View: Keep using textEditor (read-only)
                 tab.textEditor.setVisible(True)
                 tab.textBrowser.setVisible(False)
@@ -1766,7 +1766,7 @@ a.binary {{color:#69F}}
         
         # Update syntax highlighting immediately without full refresh
         enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
-        if hasattr(tab, 'highlighter') and tab.highlighter:
+        if tab.highlighter:
             tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
         
         # Refresh the tab to apply the new parsing mode and update widget visibility
@@ -3135,10 +3135,7 @@ a.binary {{color:#69F}}
                         # Stop Loading Tab stops the expensive parsing of the file
                         # for links, checking if the links actually exist, etc.
                         # Setting it to this bypasses link parsing if the tab is in edit mode.
-                        inRawView = getattr(tab, 'inRawView', False)
-                        shouldStop = tab.inEditMode or inRawView or not self.preferences['parseLinks']
-                        logger.debug("Parser stop decision: inEditMode=%s, inRawView=%s, parseLinks=%s, shouldStop=%s", 
-                                   tab.inEditMode, inRawView, self.preferences['parseLinks'], shouldStop)
+                        shouldStop = tab.inEditMode or tab.inRawView or not self.preferences['parseLinks']
                         parser.stop(shouldStop)
                         self.actionStop.setEnabled(True)
 
@@ -3153,9 +3150,9 @@ a.binary {{color:#69F}}
                             logger.debug("Setting plain text (Edit Mode)")
                             tab.textEditor.setPlainText("".join(parser.text))
                             tab.textEditor.setReadOnly(False)  # Enable editing
-                        elif getattr(tab, 'inRawView', False):
+                        elif tab.inRawView:
                             # Raw View mode: Use textEditor for ultra-fast plain text display
-                            logger.debug("Setting plain text (Raw View Mode - ultra-fast)")
+                            logger.debug("Setting plain text (Raw View Mode)")
                             tab.textEditor.setVisible(True)
                             tab.textBrowser.setVisible(False)
                             tab.textEditor.setPlainText("".join(parser.text))
@@ -3187,18 +3184,15 @@ a.binary {{color:#69F}}
                 # Load an empty tab pointing to the nonexistent file.
                 self.setHighlighter(ext, tab=tab)
                 
-                # Set empty content based on current view mode
                 if tab.inEditMode:
                     tab.textEditor.setPlainText("")
                     tab.textEditor.setReadOnly(False)
-                elif getattr(tab, 'inRawView', False):
-                    # Raw View: Use textEditor for consistency and speed
+                elif tab.inRawView:
                     tab.textEditor.setVisible(True)
                     tab.textBrowser.setVisible(False)
                     tab.textEditor.setPlainText("")
                     tab.textEditor.setReadOnly(True)
                 else:
-                    # Normal View: Use textBrowser
                     tab.textBrowser.setVisible(True)
                     tab.textEditor.setVisible(False)
                     tab.textBrowser.setHtml("")
