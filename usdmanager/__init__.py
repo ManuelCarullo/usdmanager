@@ -755,7 +755,6 @@ a.binary {{color:#69F}}
             'tabSpaces': int(self.config.value("tabSpaces", default['tabSpaces'])),
             'theme': self.config.value("theme", default['theme']),
             'lineLimit': int(self.config.value("lineLimit", default['lineLimit'])),
-            'rawModeMaxSize': int(self.config.value("rawModeMaxSize", default['rawModeMaxSize'])),
             'autoIndent': self.config.boolValue("autoIndent", default['autoIndent']),
         }
 
@@ -834,7 +833,6 @@ a.binary {{color:#69F}}
         self.config.setValue("tabSpaces", self.preferences['tabSpaces'])
         self.config.setValue("theme", self.preferences['theme'])
         self.config.setValue("lineLimit", self.preferences['lineLimit'])
-        self.config.setValue("rawModeMaxSize", self.preferences['rawModeMaxSize'])
         self.config.setValue("autoIndent", self.preferences['autoIndent'])
 
         # Write self.programs to settings object
@@ -1760,9 +1758,6 @@ a.binary {{color:#69F}}
         # Don't allow raw view in edit mode
         if tab.inEditMode:
             return False
-
-        # Toggle raw view mode
-        tab.inRawView = not tab.inRawView
         
         # Update syntax highlighting immediately without full refresh
         enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
@@ -4973,7 +4968,6 @@ class App(QtCore.QObject):
             'newTab': False,
             'parseLinks': True,
             'rawViewDefault': False,
-            'rawModeMaxSize': 50 * 1024 * 1024,  # 50MB limit for raw mode streaming
             'showAllMessages': True,
             'showHiddenFiles': False,
             'syntaxHighlighting': True,
