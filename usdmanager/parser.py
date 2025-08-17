@@ -182,13 +182,10 @@ class FileParser(QObject):
         """
         self.cleanup()
         
-        # Fast path for raw mode - bypass heavy processing
         if self._stop:
-            logger.debug("Using raw mode parsing for file: %s", nativeAbsPath)
             return self.parseRawMode(nativeAbsPath)
         
         self.status.emit("Reading file (Normal Mode)")
-        logger.debug("Using normal parsing mode for file: %s", nativeAbsPath)
         self.text = self.read(nativeAbsPath)
         
         # TODO: Figure out a better way to handle streaming text for large files like Crate geometry.
@@ -276,7 +273,6 @@ class FileParser(QObject):
         """
         return HTML_BODY.format(text)
     
-    
     def parseRawMode(self, nativeAbsPath):
         """ Fast parsing for Raw View mode - bypasses link parsing and minimal HTML generation.
         
@@ -296,10 +292,6 @@ class FileParser(QObject):
                           "Advanced tab of Preferences.".format(limit)
         
         self.parent().loadingProgressBar.setMaximum(length)
-        
-        
-        logger.debug("Raw mode parsing complete")
-    
     
     def parseMatch(self, match, linkPath, nativeAbsPath, fileInfo):
         """ Parse a RegEx match of a patch to another file.
@@ -373,7 +365,6 @@ class FileParser(QObject):
         with open(path) as f:
             return f.readlines()
     
-    
     def stop(self, stop=True):
         """ Request to stop parsing the active file for links.
         
@@ -384,8 +375,6 @@ class FileParser(QObject):
                 To stop or not
         """
         self._stop = stop
-        if stop:
-            logger.debug("Parser stop flag set to True - will use raw mode")
 
     @Slot(bool)
     def stopTriggered(self, checked=False):

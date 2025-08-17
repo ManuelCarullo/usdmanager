@@ -539,7 +539,6 @@ a.binary {{color:#69F}}
         self.currTab = self.newTab()
         self.setNavigationMenus()
         
-        # Ensure UI reflects initial tab state (e.g., Raw View button text)
         self.updateEditButtons()
 
         # Adjust tab order.
@@ -604,7 +603,6 @@ a.binary {{color:#69F}}
             tab.highlighter.deleteLater()
             tab.highlighter = highlighter.Highlighter(tab.getCurrentTextWidget().document(), master)
         
-        # Disable syntax highlighting if in Raw View mode
         enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
         tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
 
@@ -1692,7 +1690,7 @@ a.binary {{color:#69F}}
             vScrollPos = tab.textBrowser.verticalScrollBar().value()
             tab.textBrowser.setVisible(False)
             tab.textEditor.setVisible(True)
-            tab.textEditor.setReadOnly(False)  # Enable editing in edit mode
+            tab.textEditor.setReadOnly(False)
             
             tab.textEditor.setFocus()
             tab.textEditor.horizontalScrollBar().setValue(hScrollPos)
@@ -1707,17 +1705,14 @@ a.binary {{color:#69F}}
             # be safe, but this can be slow.
             refreshed = self.refreshTab(tab=tab)
 
-            # Handle widget visibility based on Raw View mode
             if tab.inRawView:
-                # Raw View: Keep using textEditor (read-only)
                 tab.textEditor.setVisible(True)
                 tab.textBrowser.setVisible(False)
-                tab.textEditor.setReadOnly(True)  # Disable editing in raw view
+                tab.textEditor.setReadOnly(True)
                 tab.textEditor.setFocus()
                 tab.textEditor.horizontalScrollBar().setValue(hScrollPos)
                 tab.textEditor.verticalScrollBar().setValue(vScrollPos)
             else:
-                # Normal View: Use textBrowser for rich HTML display
                 tab.textEditor.setVisible(False)
                 tab.textBrowser.setVisible(True)
                 
@@ -1755,33 +1750,26 @@ a.binary {{color:#69F}}
         if not tab:
             return False
 
-        # Don't allow raw view in edit mode
         if tab.inEditMode:
             return False
         
-        # Update syntax highlighting immediately without full refresh
         enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
         if tab.highlighter:
             tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
         
-        # Refresh the tab to apply the new parsing mode and update widget visibility
         self.refreshTab(tab=tab)
         
-        # After refresh, ensure proper widget visibility for new raw view state
-        if not tab.inEditMode:  # Only adjust if not in edit mode
+        if not tab.inEditMode:
             if tab.inRawView:
-                # Switching to Raw View: Use textEditor for fast plain text
                 tab.textBrowser.setVisible(False)
                 tab.textEditor.setVisible(True)
                 tab.textEditor.setReadOnly(True)
                 tab.textEditor.setFocus()
             else:
-                # Switching to Normal View: Use textBrowser for rich HTML
                 tab.textEditor.setVisible(False)
                 tab.textBrowser.setVisible(True)
                 tab.textBrowser.setFocus()
         
-        # Ensure UI buttons are updated even if refreshTab() returns early (e.g., for empty tabs)
         if tab == self.currTab:
             self.updateEditButtons()
         
@@ -3139,21 +3127,20 @@ a.binary {{color:#69F}}
                         self.tabWidget.setTabIcon(idx, parser.icon)
                         self.setHighlighter(ext, tab=tab)
                         
-                        # Set content based on current view mode
                         if tab.inEditMode:
                             # Edit mode: textEditor visible, textBrowser hidden
                             logger.debug("Setting plain text (Edit Mode)")
                             tab.textEditor.setPlainText("".join(parser.text))
                             tab.textEditor.setReadOnly(False)  # Enable editing
                         elif tab.inRawView:
-                            # Raw View mode: Use textEditor for ultra-fast plain text display
+                            # Raw View mode: Use textEditor for fast plain text display
                             logger.debug("Setting plain text (Raw View Mode)")
                             tab.textEditor.setVisible(True)
                             tab.textBrowser.setVisible(False)
                             tab.textEditor.setPlainText("".join(parser.text))
-                            tab.textEditor.setReadOnly(True)  # Disable editing in raw view
+                            tab.textEditor.setReadOnly(True)
                         else:
-                            # Normal View mode: textBrowser visible for rich HTML display
+                            # Normal View mode: textBrowser visible for HTML display
                             logger.debug("Setting HTML (Normal View Mode)")
                             tab.textBrowser.setVisible(True)
                             tab.textEditor.setVisible(False)
@@ -4455,7 +4442,6 @@ class BrowserTab(QtWidgets.QWidget):
         self.isActive = True  # Track if this tab is open or has been closed.
         self.isNewTab = True  # Track if this tab has been used for any files yet.
         self.setAcceptDrops(True)
-        
         self.breadcrumb = ""
         self.history = []  # List of FileStatus objects
         self.historyIndex = -1  # First file opened will be 0.
