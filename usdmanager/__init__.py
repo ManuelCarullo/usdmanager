@@ -1753,6 +1753,8 @@ a.binary {{color:#69F}}
         if tab.inEditMode:
             return False
         
+        tab.inRawView = not tab.inRawView
+        
         enableHighlighting = self.preferences['syntaxHighlighting'] and not tab.inRawView
         if tab.highlighter:
             tab.highlighter.master.setSyntaxHighlighting(enableHighlighting)
